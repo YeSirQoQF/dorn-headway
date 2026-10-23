@@ -11,7 +11,7 @@
     <canvas id="board" tabindex="0" aria-label="弹射组装游戏区域：移动瞄准，发射小圆，为灰色大圆装上两只相对的耳朵。"></canvas>
 
     <div class="tool-dock" id="tool-dock" hidden>
-      <button class="tool-slot" type="button" data-index="0" aria-label="原料：小圆">
+      <button class="tool-slot" type="button" data-index="0" aria-label="道具：原料">
         <span class="tool-icon tool-icon-ball" aria-hidden="true"></span>
         <span class="tool-cd" aria-hidden="true"></span>
       </button>
@@ -40,6 +40,12 @@
       <span>送达率 <strong id="hud-rate">--</strong></span>
     </div>
 
+    <div class="hud mode-hud" id="mode-hud" hidden>
+      <span>最长纪录 <strong id="mh-best-survival">--</strong></span>
+      <span>最大吞噬 <strong id="mh-best-eaten">--</strong></span>
+      <span>最大增重 <strong id="mh-best-gain">--</strong></span>
+    </div>
+
     <p class="hint">瞄准射击（点击 / 空格）· A/D 移位 · R/F 道具 · W/S 电场 · 右键减速 · ESC 暂停</p>
 
     <div class="start-overlay" id="start-overlay">
@@ -57,6 +63,14 @@
           <path d="M12 3.4l2.7 5.5 6 .9-4.3 4.2 1 6-5.4-2.8-5.4 2.8 1-6L3.3 9.8l6-.9z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" />
         </svg>
       </a>
+      <button class="repo-button news-button" id="news-button" type="button" aria-label="更新公告">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <circle cx="12" cy="3.6" r="1.3" fill="currentColor" />
+          <path d="M12 4.8 L6.4 8 M12 4.8 L17.6 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          <rect x="4.8" y="8" width="14.4" height="10.2" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8" />
+          <path d="M8 11.4 h8 M8 14.6 h5.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+        </svg>
+      </button>
       <svg class="game-logo" viewBox="0 0 96 96" aria-hidden="true">
         <circle cx="16" cy="48" r="14" fill="#161e27" />
         <circle cx="80" cy="48" r="14" fill="#161e27" />
@@ -110,19 +124,37 @@
       </footer>
     </div>
 
+    <div class="help-overlay" id="mode-overlay" hidden>
+      <div class="help-card mode-card">
+        <h1>选择模式</h1>
+        <div class="mode-list">
+          <button class="mode-option" id="mode-classic" type="button">
+            <strong>经典模式</strong>
+            <small>组装、接头、送货，比拼送达率</small>
+          </button>
+          <button class="mode-option" id="mode-blackhole" type="button">
+            <strong>合成大黑洞</strong>
+            <small>保留全部玩法，让黑洞活得尽可能久、长得尽可能大</small>
+          </button>
+        </div>
+        <button id="mode-back" type="button" class="secondary">返回</button>
+      </div>
+    </div>
+
     <div class="help-overlay" id="help-overlay" hidden>
       <div class="help-card">
         <h1>游戏说明</h1>
         <div class="help-content">
           <p class="help-intro">某款神奇的玩偶正在量产，给手办的头安上耳朵，再让头装到身体上，完成订单吧！</p>
           <p>目标：做出完整的头送到身体上。送达越多、失误越少，送达率越高。</p>
+          <p>模式：开始游戏时可选——经典模式比拼送达率；“合成大黑洞”保留全部玩法，让黑洞活得尽可能久，记录最长存续、最大吞噬与最大增重。</p>
           <p>组装：发射小圆，碰到漂浮的大圆就粘成耳朵；两只耳朵正对着贴好，头就完成了。</p>
           <p>送货：身体会从场下经过，把头送到它旁边就会自动接上、直接出厂；没接到头的身体算空车。</p>
           <p>受伤：小圆、大圆、半成品砸到身体会累积受击点（血条下的圆点），攒满 3 点掉 1 血——空车挨撞时按撞击物计点：小圆 2 点、大圆和半成品 4 点、完整的头 6 点；严格模式下接到头后，每次受击固定只累积 1 点。血掉光就是炸单。连续炸单太多，本局结束。</p>
           <p>道具：R/F 或滚轮切换。气球飞快轻盈，碰到东西就碎、给身体 1 点受击；炸弹碰哪炸哪，炸毁附近的物体，贴到身体上会扣 4 滴血；黑洞吸引并吞掉一切，碰到身体直接炸单，几秒后自行消散。</p>
           <p>电场：小圆带 -1 电荷、大圆带 +2；耳朵会抵消——半成品带 +1，完整头恰好不带电。按住 W 撑起竖直向上的电场：小球被向下推、大圆被向上拉；按住 S 电场向下、效果相反。</p>
           <p>操作：鼠标瞄准，点击或空格发射；A/D 左右移动发射点；按住右键放慢全场时间；ESC 暂停。</p>
-          <p>设置：不败模式不会失败；严格模式接上头后身体仍会受击；飙速模式身体以最密节奏接连出场。</p>
+          <p>设置：不败模式不会失败；严格模式接上头后身体仍会受击；飙速模式身体以最密节奏接连出场；黑洞膨胀让黑洞半径随质量线性增大，关闭后固定为最小半径。</p>
         </div>
         <button id="help-back" type="button" class="secondary">返回</button>
       </div>
@@ -138,22 +170,46 @@
       </div>
     </div>
 
+    <div class="help-overlay" id="news-overlay" hidden>
+      <div class="help-card news-card">
+        <h1>更新公告</h1>
+        <div class="help-content">
+          <p class="news-date">2026 年 10 月 23 日</p>
+          <p>新增“合成大黑洞”玩法：保留全部接头机制，目标改为让黑洞活得尽可能久——黑洞随时间按三次方根曲线衰变，吞噬物体增长质量并延长寿命，两洞相遇时质量小的消散。记录最长存续、最大吞噬与最大增重。</p>
+          <p>设置新增“游戏机制”栏目与“黑洞膨胀”开关（默认关闭），开启后黑洞半径随质量线性增大。</p>
+        </div>
+        <button id="news-back" type="button" class="secondary">返回</button>
+      </div>
+    </div>
+
     <div class="settings-overlay" id="settings-overlay" hidden>
       <div class="settings-card">
         <h1>设置</h1>
-        <div class="settings-list">
-          <label class="toggle-row">
-            <input type="checkbox" id="invincible-toggle" />
-            <span>不败模式<small>永远不会失败，放心练手</small></span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" id="strict-toggle" />
-            <span>严格模式<small>接到头后身体仍会受击，每 3 次受击掉 1 血</small></span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" id="turbo-toggle" />
-            <span>飙速模式<small>身体以最密节奏接连出场，一个紧挨一个</small></span>
-          </label>
+        <div class="settings-group">
+          <h2>游戏模式</h2>
+          <div class="settings-list">
+            <label class="toggle-row">
+              <input type="checkbox" id="invincible-toggle" />
+              <span>不败模式<small>永远不会失败，放心练手</small></span>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" id="strict-toggle" />
+              <span>严格模式<small>接到头后身体仍会受击，每 3 次受击掉 1 血</small></span>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" id="turbo-toggle" />
+              <span>飙速模式<small>身体以最密节奏接连出场，一个紧挨一个</small></span>
+            </label>
+          </div>
+        </div>
+        <div class="settings-group">
+          <h2>游戏机制</h2>
+          <div class="settings-list">
+            <label class="toggle-row">
+              <input type="checkbox" id="blackhole-grow-toggle" />
+              <span>黑洞膨胀<small>黑洞半径随质量线性增大；关闭后固定为最小半径</small></span>
+            </label>
+          </div>
         </div>
         <button id="settings-back" type="button" class="secondary">返回</button>
       </div>

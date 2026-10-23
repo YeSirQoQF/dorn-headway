@@ -12,6 +12,10 @@
   const BALLOON_SPEED_MULT = 12;
   const LAUNCH_SPEED = 560;
   const TOOL_COOLDOWNS = { ball: 0.35, balloon: 0.15, bomb: 3, blackhole: 5 };
+
+  function cooldownFor(tool) {
+    return tool === "blackhole" && gameMode === "blackhole" ? 8 : TOOL_COOLDOWNS[tool];
+  }
   const BOMB_RADIUS = SMALL_RADIUS;
   const BOMB_MASS = SMALL_MASS;
   const EXPLOSION_IMPULSE = 30000000;
@@ -19,11 +23,12 @@
   const EXPLOSION_DESTROY_RADIUS = SMALL_RADIUS * 1.5;
   const BLACKHOLE_RADIUS = BALLOON_RADIUS;
   const BLACKHOLE_MASS = 8192;
-  const BLACKHOLE_HALF_LIFE = 0.5;
+  const BLACKHOLE_LIFETIME = 6;
+  const BLACKHOLE_RADIUS_MASS = 4096;
   const BLACKHOLE_GRAVITY = 20000;
   const BLACKHOLE_SPEED = LAUNCH_SPEED / 8;
   const BLACKHOLE_CART_BONUS = 128;
-  const BLACKHOLE_DISK_RADIUS = BIG_RADIUS;
+  const BLACKHOLE_FULL_CART_BONUS = 256;
   const AIM_MIN = 0.18;
   const AIM_MAX = Math.PI - 0.18;
   const GHOST_RADIUS = SMALL_RADIUS * 0.6;
@@ -80,6 +85,7 @@
   const invincibleToggle = document.getElementById("invincible-toggle");
   const strictToggle = document.getElementById("strict-toggle");
   const turboToggle = document.getElementById("turbo-toggle");
+  const blackholeGrowToggle = document.getElementById("blackhole-grow-toggle");
   const settingsOverlay = document.getElementById("settings-overlay");
   const settingsOpenButton = document.getElementById("settings-open");
   const settingsBackButton = document.getElementById("settings-back");
@@ -90,6 +96,17 @@
   const aboutOverlay = document.getElementById("about-overlay");
   const aboutButton = document.getElementById("about-button");
   const aboutBackButton = document.getElementById("about-back");
+  const newsOverlay = document.getElementById("news-overlay");
+  const newsButton = document.getElementById("news-button");
+  const newsBackButton = document.getElementById("news-back");
+  const modeOverlay = document.getElementById("mode-overlay");
+  const modeClassicButton = document.getElementById("mode-classic");
+  const modeBlackholeButton = document.getElementById("mode-blackhole");
+  const modeBackButton = document.getElementById("mode-back");
+  const modeHud = document.getElementById("mode-hud");
+  const modeBestSurvivalNode = document.getElementById("mh-best-survival");
+  const modeBestEatenNode = document.getElementById("mh-best-eaten");
+  const modeBestGainNode = document.getElementById("mh-best-gain");
   const gameLogo = document.querySelector(".game-logo");
   const stageHead = document.querySelector(".stage-head");
   const toolDock = document.getElementById("tool-dock");
@@ -104,9 +121,10 @@
         invincible: Boolean(saved && saved.invincible),
         strict: Boolean(saved && saved.strict),
         turbo: Boolean(saved && saved.turbo),
+        blackholeGrow: saved && typeof saved.blackholeGrow === "boolean" ? saved.blackholeGrow : false,
       };
     } catch (_) {
-      return { invincible: false, strict: false, turbo: false };
+      return { invincible: false, strict: false, turbo: false, blackholeGrow: false };
     }
   }
 
@@ -132,8 +150,46 @@
   let pixelRatio = 1;
 
   const settings = loadSettings();
+
+  const RECORDS_KEY = "dorn-headway-blackhole-records-v1";
+
+  function loadBlackholeRecords() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(RECORDS_KEY) || "null");
+      const legacyGain = saved && Number.isFinite(saved.bestMass)
+        ? Math.max(0, saved.bestMass - BLACKHOLE_MASS)
+        : 0;
+      return {
+        bestSurvival: saved && Number.isFinite(saved.bestSurvival) ? saved.bestSurvival : 0,
+        bestEaten: saved && Number.isFinite(saved.bestEaten) ? saved.bestEaten : 0,
+        bestGain: saved && Number.isFinite(saved.bestGain) ? saved.bestGain : legacyGain,
+      };
+    } catch (_) {
+      return { bestSurvival: 0, bestEaten: 0, bestGain: 0 };
+    }
+  }
+
+  function saveBlackholeRecords() {
+    try {
+      window.localStorage.setItem(RECORDS_KEY, JSON.stringify(blackholeRecords));
+    } catch (_) {
+      // records just won't persist
+    }
+  }
+
+  let recordsSavedAt = -Infinity;
+
+  function saveBlackholeRecordsThrottled() {
+    if (simTime - recordsSavedAt < 1) return;
+    recordsSavedAt = simTime;
+    saveBlackholeRecords();
+  }
+
+  const blackholeRecords = loadBlackholeRecords();
+  let gameMode = "classic";
+
   const TOOLS = ["ball", "balloon", "bomb", "blackhole"];
-  const TOOL_NAMES = { ball: "小圆", balloon: "气球", bomb: "炸弹", blackhole: "黑洞" };
+  const TOOL_NAMES = { ball: "原料", balloon: "气球", bomb: "炸弹", blackhole: "黑洞" };
   const SLOW_MOTION_SCALE = 1 / 8;
   const heldKeys = new Set();
   const lastLaunchByTool = { ball: -Infinity, balloon: -Infinity, bomb: -Infinity, blackhole: -Infinity };
@@ -203,12 +259,18 @@
     });
   }
 
+  function blackholeRadiusFor(mass) {
+    if (!settings.blackholeGrow) return BLACKHOLE_RADIUS;
+    return Math.max(BLACKHOLE_RADIUS, (BLACKHOLE_RADIUS * mass) / BLACKHOLE_RADIUS_MASS);
+  }
+
   function addBlackhole(x, y, vx, vy) {
     return world.addBody({
-      parts: [{ x, y, r: BLACKHOLE_RADIUS, mass: BLACKHOLE_MASS, kind: "blackhole" }],
+      parts: [{ x, y, r: blackholeRadiusFor(BLACKHOLE_MASS), mass: BLACKHOLE_MASS, kind: "blackhole" }],
       vx,
       vy,
       tag: "blackhole",
+      data: { bornAt: simTime, baseMass: BLACKHOLE_MASS, eatenMass: 0 },
     });
   }
 
@@ -261,7 +323,7 @@
   function fire() {
     if (!started || ended || paused) return false;
     const tool = TOOLS[selectedToolIndex];
-    if (simTime - lastLaunchByTool[tool] < TOOL_COOLDOWNS[tool]) return false;
+    if (simTime - lastLaunchByTool[tool] < cooldownFor(tool)) return false;
     lastLaunchByTool[tool] = simTime;
     const emitter = emitterPoint();
     const dirX = Math.cos(aim);
@@ -523,7 +585,7 @@
     consecutiveBlown += 1;
     pushToast("炸单！");
     updateHud();
-    if (!settings.invincible && consecutiveBlown >= blowLimitThreshold()) {
+    if (!effectiveInvincible() && consecutiveBlown >= blowLimitThreshold()) {
       endGame();
     }
   }
@@ -534,6 +596,10 @@
 
   function allowedStreak() {
     return Math.max(0, Math.ceil(blowLimitThreshold()) - 1);
+  }
+
+  function effectiveInvincible() {
+    return settings.invincible || gameMode === "blackhole";
   }
 
   function endGame() {
@@ -548,16 +614,22 @@
     endOverlay.hidden = false;
   }
 
-  function startRun() {
+  function startRun(mode) {
+    gameMode = mode === "blackhole" ? "blackhole" : "classic";
     homeOverlay.hidden = true;
+    modeOverlay.hidden = true;
     endOverlay.hidden = true;
     toolDock.hidden = false;
     toolNameNode.hidden = false;
+    modeHud.hidden = gameMode !== "blackhole";
     started = true;
     ended = false;
     setPaused(false);
     resetGame();
     syncToolDock();
+    if (gameMode === "blackhole") {
+      pushToast("合成大黑洞：让黑洞活得尽可能久");
+    }
   }
 
   function goHome() {
@@ -574,6 +646,9 @@
     settingsOverlay.hidden = true;
     helpOverlay.hidden = true;
     aboutOverlay.hidden = true;
+    newsOverlay.hidden = true;
+    modeOverlay.hidden = true;
+    modeHud.hidden = true;
     homeOverlay.hidden = false;
     endOverlay.hidden = true;
   }
@@ -628,6 +703,23 @@
     streakNode.textContent = String(consecutiveBlown);
     const rate = deliveryRate();
     rateNode.textContent = rate === null ? "--" : `${rate}%`;
+  }
+
+  let modeHudAt = -Infinity;
+
+  function updateModeHud() {
+    if (gameMode !== "blackhole" || modeHud.hidden) return;
+    if (simTime - modeHudAt < 0.05) return;
+    modeHudAt = simTime;
+    modeBestSurvivalNode.textContent = blackholeRecords.bestSurvival > 0
+      ? formatSurvival(blackholeRecords.bestSurvival)
+      : "--";
+    modeBestEatenNode.textContent = blackholeRecords.bestEaten > 0
+      ? String(Math.round(blackholeRecords.bestEaten))
+      : "--";
+    modeBestGainNode.textContent = blackholeRecords.bestGain > 0
+      ? String(Math.round(blackholeRecords.bestGain))
+      : "--";
   }
 
   function updateEmitter(dt) {
@@ -769,6 +861,29 @@
     }
   }
 
+  function formatSurvival(seconds) {
+    return `${seconds.toFixed(3)}s`;
+  }
+
+  function refreshBlackholeMass(hole) {
+    const life = Math.max(0, simTime - hole.data.bornAt);
+    if (hole.data.baseMass === undefined) hole.data.baseMass = hole.mass;
+    const lifetime = BLACKHOLE_LIFETIME * Math.pow(hole.data.baseMass / BLACKHOLE_MASS, 3);
+    const decay = Math.max(0, 1 - life / lifetime);
+    hole.mass = hole.data.baseMass * Math.cbrt(decay);
+    return hole.mass;
+  }
+
+  function settleBlackholeSurvival(hole) {
+    const survival = simTime - hole.data.bornAt;
+    if (gameMode !== "blackhole") return survival;
+    if (survival > blackholeRecords.bestSurvival) {
+      blackholeRecords.bestSurvival = survival;
+      saveBlackholeRecords();
+    }
+    return survival;
+  }
+
   function updateBlackholes(dt) {
     for (const hole of [...world.bodies]) {
       if (hole.tag !== "blackhole") continue;
@@ -776,29 +891,70 @@
       const part = hole.parts[0];
       let wp = physics.worldPoint(hole, part);
 
-      hole.mass *= Math.pow(0.5, dt / BLACKHOLE_HALF_LIFE);
+      hole.data.survival = simTime - hole.data.bornAt;
+      refreshBlackholeMass(hole);
+      part.r = blackholeRadiusFor(hole.mass);
+      if (gameMode === "blackhole") {
+        if (hole.data.survival > blackholeRecords.bestSurvival) {
+          blackholeRecords.bestSurvival = hole.data.survival;
+          saveBlackholeRecordsThrottled();
+        }
+        const eatenNow = hole.data.eatenMass || 0;
+        if (eatenNow > blackholeRecords.bestEaten) {
+          blackholeRecords.bestEaten = eatenNow;
+          saveBlackholeRecords();
+        }
+        const gain = hole.mass - BLACKHOLE_MASS;
+        if (gain > blackholeRecords.bestGain) {
+          blackholeRecords.bestGain = gain;
+          saveBlackholeRecords();
+        }
+      }
+
       if (hole.mass < 1) {
+        const survival = settleBlackholeSurvival(hole);
+        if (gameMode === "blackhole") pushToast(`黑洞消散 ${formatSurvival(survival)}`);
         world.removeBody(hole);
         spawnBurst(wp.x, wp.y, ["#8a7ab8", "#b8a8dd"]);
         continue;
       }
 
+      let consumed = false;
       for (const body of [...world.bodies]) {
         if (body === hole) continue;
         if (!world.bodies.includes(body)) continue;
+        if (!world.bodies.includes(hole)) break;
 
         if (body.tag === "blackhole") {
           const bpart = body.parts[0];
           const bwp = physics.worldPoint(body, bpart);
           if (physics.distance(wp.x, wp.y, bwp.x, bwp.y) <= part.r + bpart.r + 2) {
             const total = hole.mass + body.mass;
-            hole.x = (hole.x * hole.mass + body.x * body.mass) / total;
-            hole.y = (hole.y * hole.mass + body.y * body.mass) / total;
-            hole.vx = (hole.vx * hole.mass + body.vx * body.mass) / total;
-            hole.vy = (hole.vy * hole.mass + body.vy * body.mass) / total;
-            hole.mass = total;
+            const victim = hole.mass >= body.mass ? body : hole;
+            const survivor = victim === hole ? body : hole;
+            survivor.x = (hole.x * hole.mass + body.x * body.mass) / total;
+            survivor.y = (hole.y * hole.mass + body.y * body.mass) / total;
+            survivor.vx = (hole.vx * hole.mass + body.vx * body.mass) / total;
+            survivor.vy = (hole.vy * hole.mass + body.vy * body.mass) / total;
+            survivor.data.baseMass = (survivor.data.baseMass || survivor.mass) + victim.mass;
+            refreshBlackholeMass(survivor);
+            survivor.parts[0].r = blackholeRadiusFor(survivor.mass);
+            survivor.invMass = 1 / survivor.mass;
+            survivor.inertia = 0.5 * survivor.mass * survivor.parts[0].r * survivor.parts[0].r;
+            survivor.invInertia = 1 / survivor.inertia;
+            survivor.data.eatenMass = (survivor.data.eatenMass || 0)
+              + (victim.data.eatenMass || 0)
+              + victim.mass;
+            const survival = settleBlackholeSurvival(victim);
+            if (gameMode === "blackhole") {
+              pushToast(`黑洞合并 ${formatSurvival(survival)}`);
+            }
             spawnBurst(wp.x, wp.y, ["#8a7ab8", "#b8a8dd"]);
-            world.removeBody(body);
+            world.removeBody(victim);
+            if (victim === hole) {
+              consumed = true;
+              break;
+            }
             wp = physics.worldPoint(hole, part);
             continue;
           }
@@ -812,7 +968,11 @@
             }
           }
           if (eaten) {
-            hole.mass += BLACKHOLE_CART_BONUS;
+            const gain = body.data.state === "loaded"
+              ? BLACKHOLE_FULL_CART_BONUS
+              : BLACKHOLE_CART_BONUS;
+            hole.data.baseMass = (hole.data.baseMass || hole.mass) + gain;
+            hole.data.eatenMass = (hole.data.eatenMass || 0) + gain;
             explodeCart(body);
           }
           continue;
@@ -826,7 +986,8 @@
             }
           }
           if (eaten) {
-            hole.mass += body.mass;
+            hole.data.baseMass = (hole.data.baseMass || hole.mass) + body.mass;
+            hole.data.eatenMass = (hole.data.eatenMass || 0) + body.mass;
             spawnBurst(wp.x, wp.y, ["#8a7ab8", "#b8a8dd"]);
             world.removeBody(body);
             continue;
@@ -841,6 +1002,7 @@
         body.vx += dx * inv * accel * dt;
         body.vy += dy * inv * accel * dt;
       }
+      if (consumed) continue;
 
       hole.invMass = 1 / hole.mass;
       hole.inertia = 0.5 * hole.mass * part.r * part.r;
@@ -900,6 +1062,7 @@
     if (openBigs < MAX_OPEN_BIGS && spawnCooldown <= 0) {
       spawnCooldown = spawnBigCircle() ? SPAWN_INTERVAL : 0.6;
     }
+    updateModeHud();
   }
 
   function attachFillColor(part) {
@@ -915,19 +1078,20 @@
   }
 
   function drawBlackhole(x, y, radius) {
-    const disk = context.createRadialGradient(x, y, radius + 1, x, y, BLACKHOLE_DISK_RADIUS);
+    const diskRadius = radius * 4;
+    const disk = context.createRadialGradient(x, y, radius + 1, x, y, diskRadius);
     disk.addColorStop(0, "rgba(255, 150, 70, 0.55)");
     disk.addColorStop(0.5, "rgba(180, 100, 200, 0.28)");
     disk.addColorStop(1, "rgba(180, 100, 200, 0)");
     context.beginPath();
-    context.arc(x, y, BLACKHOLE_DISK_RADIUS, 0, Math.PI * 2);
+    context.arc(x, y, diskRadius, 0, Math.PI * 2);
     context.fillStyle = disk;
     context.fill();
 
     for (let i = 0; i < 3; i += 1) {
       const start = simTime * 2.4 + i * ((Math.PI * 2) / 3);
       context.beginPath();
-      context.arc(x, y, BLACKHOLE_DISK_RADIUS * 0.72, start, start + 1.1);
+      context.arc(x, y, diskRadius * 0.72, start, start + 1.1);
       context.strokeStyle = "rgba(240, 170, 110, 0.65)";
       context.lineWidth = 2.5;
       context.stroke();
@@ -1196,7 +1360,7 @@
   function drawEmitter() {
     const emitter = emitterPoint();
     const tool = TOOLS[selectedToolIndex];
-    const ready = simTime - lastLaunchByTool[tool] >= TOOL_COOLDOWNS[tool];
+    const ready = simTime - lastLaunchByTool[tool] >= cooldownFor(tool);
     context.save();
     context.beginPath();
     context.arc(emitter.x, emitter.y, 13, 0, Math.PI * 2);
@@ -1426,6 +1590,7 @@
     shockRings.length = 0;
     emitterFactor = 0.5;
     aim = Math.PI / 2;
+    modeHudAt = -Infinity;
     for (let i = 0; i < 2; i += 1) spawnBigCircle();
     updateHud();
   }
@@ -1538,8 +1703,9 @@
       const tool = TOOLS[index];
       const cdNode = slot.querySelector(".tool-cd");
       if (!cdNode) return;
+      const cd = cooldownFor(tool);
       const ratio = Math.max(0, Math.min(1,
-        (lastLaunchByTool[tool] + TOOL_COOLDOWNS[tool] - simTime) / TOOL_COOLDOWNS[tool]));
+        (lastLaunchByTool[tool] + cd - simTime) / cd));
       const rounded = Math.round(ratio * 100) / 100;
       if (cdNode.dataset.ratio === String(rounded)) return;
       cdNode.dataset.ratio = String(rounded);
@@ -1570,8 +1736,17 @@
     setPaused(false);
   });
 
-  startButton.addEventListener("click", startRun);
-  endAgainButton.addEventListener("click", startRun);
+  startButton.addEventListener("click", () => {
+    homeOverlay.hidden = true;
+    modeOverlay.hidden = false;
+  });
+  modeClassicButton.addEventListener("click", () => startRun("classic"));
+  modeBlackholeButton.addEventListener("click", () => startRun("blackhole"));
+  modeBackButton.addEventListener("click", () => {
+    modeOverlay.hidden = true;
+    homeOverlay.hidden = false;
+  });
+  endAgainButton.addEventListener("click", () => startRun(gameMode));
   endHomeButton.addEventListener("click", goHome);
 
   window.HeadBounce = {
@@ -1658,6 +1833,7 @@
           started,
           ended,
           paused,
+          mode: gameMode,
           consecutiveBlown,
           delivered: deliveredCount,
           empty: emptyCount,
@@ -1665,11 +1841,22 @@
           invincible: settings.invincible,
           strict: settings.strict,
           turbo: settings.turbo,
+          blackholeGrow: settings.blackholeGrow,
           blowThreshold: +blowLimitThreshold().toFixed(2),
           allowedStreak: allowedStreak(),
           carts: carts.length,
           gap: +currentCartGap().toFixed(2),
         };
+      },
+      records() {
+        return {
+          bestSurvival: +blackholeRecords.bestSurvival.toFixed(3),
+          bestEaten: Math.round(blackholeRecords.bestEaten),
+          bestGain: Math.round(blackholeRecords.bestGain),
+        };
+      },
+      simTime() {
+        return simTime;
       },
       setInvincible(value) {
         settings.invincible = Boolean(value);
@@ -1689,6 +1876,12 @@
         saveSettings();
         return settings.turbo;
       },
+      setBlackholeGrow(value) {
+        settings.blackholeGrow = Boolean(value);
+        blackholeGrowToggle.checked = settings.blackholeGrow;
+        saveSettings();
+        return settings.blackholeGrow;
+      },
     },
   };
 
@@ -1705,6 +1898,11 @@
   turboToggle.checked = settings.turbo;
   turboToggle.addEventListener("change", () => {
     settings.turbo = turboToggle.checked;
+    saveSettings();
+  });
+  blackholeGrowToggle.checked = settings.blackholeGrow;
+  blackholeGrowToggle.addEventListener("change", () => {
+    settings.blackholeGrow = blackholeGrowToggle.checked;
     saveSettings();
   });
   settingsOpenButton.addEventListener("click", () => {
@@ -1729,6 +1927,14 @@
   });
   aboutBackButton.addEventListener("click", () => {
     aboutOverlay.hidden = true;
+    homeOverlay.hidden = false;
+  });
+  newsButton.addEventListener("click", () => {
+    homeOverlay.hidden = true;
+    newsOverlay.hidden = false;
+  });
+  newsBackButton.addEventListener("click", () => {
+    newsOverlay.hidden = true;
     homeOverlay.hidden = false;
   });
   pauseHomeButton.addEventListener("click", goHome);
