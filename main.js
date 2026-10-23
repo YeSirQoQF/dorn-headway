@@ -86,6 +86,7 @@
   const strictToggle = document.getElementById("strict-toggle");
   const turboToggle = document.getElementById("turbo-toggle");
   const blackholeGrowToggle = document.getElementById("blackhole-grow-toggle");
+  const showBlackholeMassToggle = document.getElementById("show-blackhole-mass-toggle");
   const settingsOverlay = document.getElementById("settings-overlay");
   const settingsOpenButton = document.getElementById("settings-open");
   const settingsBackButton = document.getElementById("settings-back");
@@ -122,9 +123,10 @@
         strict: Boolean(saved && saved.strict),
         turbo: Boolean(saved && saved.turbo),
         blackholeGrow: saved && typeof saved.blackholeGrow === "boolean" ? saved.blackholeGrow : false,
+        showBlackholeMass: saved && typeof saved.showBlackholeMass === "boolean" ? saved.showBlackholeMass : true,
       };
     } catch (_) {
-      return { invincible: false, strict: false, turbo: false, blackholeGrow: false };
+      return { invincible: false, strict: false, turbo: false, blackholeGrow: false, showBlackholeMass: true };
     }
   }
 
@@ -1161,6 +1163,15 @@
     context.restore();
   }
 
+  function drawBlackholeMass(x, y, radius, mass) {
+    context.save();
+    context.font = "600 11px 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif";
+    context.textAlign = "center";
+    context.fillStyle = "rgba(58, 74, 88, 0.92)";
+    context.fillText(`质量 ${Math.round(mass)}`, x, y + radius * 4 + 14);
+    context.restore();
+  }
+
   function drawBodies() {
     for (const body of world.bodies) {
       if (body.tag === "cart") continue;
@@ -1171,6 +1182,9 @@
       placed.sort((a, b) => b.part.r - a.part.r);
       for (const item of placed) {
         drawCircle(item.pos.x, item.pos.y, item.part.r, item.part);
+      }
+      if (body.tag === "blackhole" && settings.showBlackholeMass) {
+        drawBlackholeMass(body.x, body.y, body.parts[0].r, body.mass);
       }
     }
   }
@@ -1842,6 +1856,7 @@
           strict: settings.strict,
           turbo: settings.turbo,
           blackholeGrow: settings.blackholeGrow,
+          showBlackholeMass: settings.showBlackholeMass,
           blowThreshold: +blowLimitThreshold().toFixed(2),
           allowedStreak: allowedStreak(),
           carts: carts.length,
@@ -1882,6 +1897,12 @@
         saveSettings();
         return settings.blackholeGrow;
       },
+      setShowBlackholeMass(value) {
+        settings.showBlackholeMass = Boolean(value);
+        showBlackholeMassToggle.checked = settings.showBlackholeMass;
+        saveSettings();
+        return settings.showBlackholeMass;
+      },
     },
   };
 
@@ -1903,6 +1924,11 @@
   blackholeGrowToggle.checked = settings.blackholeGrow;
   blackholeGrowToggle.addEventListener("change", () => {
     settings.blackholeGrow = blackholeGrowToggle.checked;
+    saveSettings();
+  });
+  showBlackholeMassToggle.checked = settings.showBlackholeMass;
+  showBlackholeMassToggle.addEventListener("change", () => {
+    settings.showBlackholeMass = showBlackholeMassToggle.checked;
     saveSettings();
   });
   settingsOpenButton.addEventListener("click", () => {
